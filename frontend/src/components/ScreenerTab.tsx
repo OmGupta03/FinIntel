@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Sparkles, Filter, ArrowRight, AlertCircle, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Sparkles, Filter, ArrowRight, AlertCircle, RefreshCw, SlidersHorizontal, Star, ShieldAlert, LayoutGrid, Table, TrendingUp } from 'lucide-react';
+import { isInWatchlist, toggleWatchlist, subscribeWatchlist, getWatchlist } from '../utils/watchlist';
 
 export interface ScreenerFilter {
   sector?: string;
@@ -13,6 +14,11 @@ export interface ScreenerFilter {
   debtLevel?: 'low' | 'moderate' | 'high';
   marketCapMin?: number;
   unsupportedFilters?: string[];
+  isBeginnerQuery?: boolean;
+  beginnerGoal?: string;
+  isAmbiguous?: boolean;
+  clarificationMessage?: string;
+  suggestedPrompts?: string[];
 }
 
 export interface CandidateStock {
@@ -29,6 +35,8 @@ export interface CandidateStock {
   revenueGrowth: number | null;
   debtToEquity: number | null;
   profitMargin: number | null;
+  beginnerExplanation?: string;
+  momentumBadge?: string;
 }
 
 interface ScreenerTabProps {
@@ -36,18 +44,33 @@ interface ScreenerTabProps {
 }
 
 export const ScreenerTab: React.FC<ScreenerTabProps> = ({ onSelectTicker }) => {
-  const [nlQuery, setNlQuery] = useState('Find Indian IT companies with ROE above 15%, revenue growth above 10%, P/E below 30 and low debt.');
+  const [nlQuery, setNlQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState<ScreenerFilter | null>(null);
   const [results, setResults] = useState<CandidateStock[]>([]);
   const [unsupportedMsg, setUnsupportedMsg] = useState<string | null>(null);
   const [hasRun, setHasRun] = useState(false);
+  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<'beginner' | 'advanced'>('beginner');
+
+  useEffect(() => {
+    setWatchlistSymbols(getWatchlist());
+    const unsub = subscribeWatchlist((symbols) => {
+      setWatchlistSymbols(symbols);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleToggleWatchlist = (ticker: string) => {
+    toggleWatchlist(ticker);
+  };
 
   const sampleQueries = [
-    'Find Indian IT companies with ROE above 15%, revenue growth above 10%, P/E below 30 and low debt.',
-    'US Tech companies with low debt and revenue growth above 15%',
-    'Indian banking companies with ROE above 16%',
-    'Companies with P/E below 25 and ROE above 20%',
+    'Find me stocks which are currently growing and give good returns in 1 month.',
+    'Show me safe, low-risk stocks with steady profits for a beginner.',
+    'Show me stocks that have been growing steadily this month.',
+    'Which Indian IT companies have steady growth and low debt?',
+    'High-quality market leaders with strong earnings and safe balance sheets.',
   ];
 
   const handleParseAndRun = async (queryToRun: string) => {
@@ -75,8 +98,18 @@ export const ScreenerTab: React.FC<ScreenerTabProps> = ({ onSelectTicker }) => {
       const filter: ScreenerFilter = parseData.data || {};
       setActiveFilter(filter);
 
+      if (filter.isBeginnerQuery) {
+        setViewMode('beginner');
+      }
+
       if (filter.unsupportedFilters && filter.unsupportedFilters.length > 0) {
         setUnsupportedMsg(filter.unsupportedFilters.join(' • '));
+      }
+
+      // If query was flagged as ambiguous, don't execute full filtering without user direction
+      if (filter.isAmbiguous) {
+        setResults([]);
+        return;
       }
 
       // Step 2: Apply Filters Deterministically
@@ -160,7 +193,7 @@ export const ScreenerTab: React.FC<ScreenerTabProps> = ({ onSelectTicker }) => {
               type="text"
               value={nlQuery}
               onChange={(e) => setNlQuery(e.target.value)}
-              placeholder="e.g. Find Indian IT companies with ROE above 15%, revenue growth above 10%, P/E below 30 and low debt..."
+              placeholder="Ask FinIntel..."
               className="w-full bg-transparent border-0 focus:ring-0 focus:outline-none pl-3 py-3 text-xs sm:text-sm text-slate-900 font-semibold placeholder:text-slate-400 placeholder:font-normal"
             />
           </div>
@@ -304,17 +337,95 @@ export const ScreenerTab: React.FC<ScreenerTabProps> = ({ onSelectTicker }) => {
         </div>
       )}
 
-      {/* Results Table */}
-      {hasRun && (
+      {/* Ambiguous Query Clarification Banner */}
+      {activeFilter?.isAmbiguous && (
+        <div className="bg-purple-50 border border-purple-200 rounded-xl p-5 space-y-3 shadow-xs">
+          <div className="flex items-center space-x-2 text-purple-900 font-bold text-sm">
+            <Sparkles className="w-4 h-4 text-purple-600 shrink-0" />
+            <span>Clarification Needed: Broad or Ambiguous Query</span>
+          </div>
+          <p className="text-xs text-purple-800 leading-relaxed font-sans">
+            {activeFilter.clarificationMessage || 'Your query is a bit broad. Choose from one of the curated investment prompts below to find vetted stocks:'}
+          </p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {(activeFilter.suggestedPrompts || sampleQueries).map((sq, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  setNlQuery(sq);
+                  handleParseAndRun(sq);
+                }}
+                className="text-xs bg-white hover:bg-purple-100 text-purple-900 border border-purple-200 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer shadow-2xs font-mono"
+              >
+                {sq}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Compliance & Performance Disclaimer (Spec Section 3.4 & 3.5) */}
+      {hasRun && !activeFilter?.isAmbiguous && (
+        <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3.5 flex items-start space-x-3 text-xs text-blue-950 font-sans shadow-xs">
+          <ShieldAlert className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <span className="font-bold">Compliance & Decision Support Notice: </span>
+            <span className="text-blue-800">
+              This discovery screener presents momentum- and financial metric-based observations of historical market performance. FinIntel / AlphaInsight AI is an educational decision-support platform, not financial or investment advice. Past performance, momentum trends, and algorithmic scores do not predict or guarantee future returns.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Results Header with View Mode Switcher */}
+      {hasRun && !activeFilter?.isAmbiguous && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-slate-50/50">
+          <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 font-mono">
-                Screened Equities ({results.length} Candidates)
-              </h3>
-              <p className="text-[11px] text-slate-500 font-mono">
-                Ranked deterministically by capital return efficiency (ROE) and top-line growth.
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900 font-mono">
+                  Screened Equities ({results.length} Candidates)
+                </h3>
+                {activeFilter?.isBeginnerQuery && (
+                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-mono font-bold px-2 py-0.5 rounded uppercase">
+                    Beginner Discovery Mode
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                {activeFilter?.isBeginnerQuery
+                  ? 'Ranked deterministically by short-term momentum, operating revenue growth, and Return on Equity (ROE).'
+                  : 'Ranked deterministically by capital return efficiency (ROE) and top-line growth.'}
               </p>
+            </div>
+
+            {/* View Mode Switcher (Beginner View vs Advanced View) */}
+            <div className="inline-flex p-1 bg-slate-100 border border-gray-200 rounded-lg text-xs font-mono font-semibold self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setViewMode('beginner')}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                  viewMode === 'beginner'
+                    ? 'bg-white text-slate-950 shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Beginner View</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('advanced')}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                  viewMode === 'advanced'
+                    ? 'bg-white text-slate-950 shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Table className="w-3.5 h-3.5" />
+                <span>Advanced View</span>
+              </button>
             </div>
           </div>
 
@@ -328,7 +439,96 @@ export const ScreenerTab: React.FC<ScreenerTabProps> = ({ onSelectTicker }) => {
                 No companies in the current dataset satisfied all filter criteria. Try relaxing the P/E ceiling or lowering the ROE threshold above.
               </p>
             </div>
+          ) : viewMode === 'beginner' ? (
+            /* --- BEGINNER VIEW: Plain English Explanation Cards --- */
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50/30">
+              {results.map((stock, index) => (
+                <div
+                  key={stock.ticker}
+                  className="bg-white border border-gray-200 hover:border-slate-300 rounded-xl p-5 space-y-3.5 shadow-xs transition-all flex flex-col justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center space-x-2.5">
+                        <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-[11px] font-mono font-bold flex items-center justify-center shrink-0">
+                          #{index + 1}
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900 text-base">{stock.ticker}</span>
+                            <span className="bg-slate-100 text-slate-600 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
+                              {stock.country} • {stock.exchange}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-sans">{stock.name}</p>
+                        </div>
+                      </div>
+                      {stock.momentumBadge && (
+                        <span className="bg-blue-50 text-blue-700 border border-blue-100 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full uppercase shrink-0">
+                          {stock.momentumBadge}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Plain Language Beginner Summary */}
+                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-xs text-slate-700 leading-relaxed font-sans">
+                      {stock.beginnerExplanation || (
+                        `${stock.name} has demonstrated consistent upward momentum with positive top-line growth and healthy return on capital.`
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Highlights Bar */}
+                  <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center space-x-3 text-[11px] font-mono">
+                      <div>
+                        <span className="text-slate-400 block text-[9px] uppercase font-bold">ROE</span>
+                        <span className="font-bold text-emerald-600">
+                          {stock.roe !== null ? `${(stock.roe * 100).toFixed(0)}%` : 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[9px] uppercase font-bold">Growth</span>
+                        <span className="font-bold text-blue-600">
+                          {stock.revenueGrowth !== null ? `${(stock.revenueGrowth * 100).toFixed(0)}%` : 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[9px] uppercase font-bold">P/E</span>
+                        <span className="font-bold text-slate-800">
+                          {stock.peRatio ? `${stock.peRatio.toFixed(1)}x` : 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleWatchlist(stock.ticker)}
+                        className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                          isInWatchlist(stock.ticker)
+                            ? 'bg-amber-50 border-amber-300 text-amber-600'
+                            : 'bg-white border-gray-200 text-slate-400 hover:text-amber-500 hover:border-amber-200'
+                        }`}
+                        title={isInWatchlist(stock.ticker) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                      >
+                        <Star className={`w-3.5 h-3.5 ${isInWatchlist(stock.ticker) ? 'fill-amber-400 text-amber-500' : ''}`} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectTicker(stock.ticker)}
+                        className="bg-slate-950 hover:bg-blue-600 text-white font-mono text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer inline-flex items-center space-x-1 shadow-xs"
+                      >
+                        <span>Deep Research</span>
+                        <ArrowRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
+            /* --- ADVANCED VIEW: Full Quantitative Financial Metrics Table --- */
             <div className="overflow-x-auto">
               <table className="w-full text-left font-mono text-xs">
                 <thead className="bg-slate-50 border-b border-gray-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -378,13 +578,28 @@ export const ScreenerTab: React.FC<ScreenerTabProps> = ({ onSelectTicker }) => {
                         {stock.debtToEquity !== null ? `${stock.debtToEquity}%` : 'N/A'}
                       </td>
                       <td className="py-3.5 px-4 text-center">
-                        <button
-                          onClick={() => onSelectTicker(stock.ticker)}
-                          className="bg-slate-950 hover:bg-blue-600 text-white font-mono text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer inline-flex items-center space-x-1 shadow-sm"
-                        >
-                          <span>Research</span>
-                          <ArrowRight className="w-3 h-3" />
-                        </button>
+                        <div className="inline-flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleWatchlist(stock.ticker)}
+                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                              isInWatchlist(stock.ticker)
+                                ? 'bg-amber-50 border-amber-300 text-amber-600'
+                                : 'bg-white border-gray-200 text-slate-400 hover:text-amber-500 hover:border-amber-200'
+                            }`}
+                            title={isInWatchlist(stock.ticker) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                          >
+                            <Star className={`w-3.5 h-3.5 ${isInWatchlist(stock.ticker) ? 'fill-amber-400 text-amber-500' : ''}`} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSelectTicker(stock.ticker)}
+                            className="bg-slate-950 hover:bg-blue-600 text-white font-mono text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer inline-flex items-center space-x-1 shadow-xs"
+                          >
+                            <span>Research</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

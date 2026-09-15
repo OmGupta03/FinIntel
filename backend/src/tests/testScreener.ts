@@ -58,6 +58,46 @@ async function runScreenerTests() {
   );
   logger.info(`[PASS] Unsupported constraint correctly surfaced: "${unsupportedList[0]}"`);
 
+  // Test 5: Casual/Beginner Prompt Handling (Spec Section 3.2 & 3.5)
+  const beginnerQuery = 'Find me stocks which are currently growing and give good returns in 1 month.';
+  logger.info(`Testing beginner query: "${beginnerQuery}"`);
+  const beginnerFilter = await screenerService.parseQueryToFilter(beginnerQuery);
+  assert(beginnerFilter.isBeginnerQuery === true, 'Filter must be recognized as beginner query');
+  assert(beginnerFilter.revenueGrowthMin !== undefined, 'Beginner query must have revenue growth constraint');
+  assert(beginnerFilter.roeMin !== undefined, 'Beginner query must have ROE constraint');
+
+  const beginnerRun = screenerService.runScreener(beginnerFilter, SCREENER_UNIVERSE);
+  assert(beginnerRun.matches.length > 0, 'Beginner prompt must return a non-empty ranked list of stocks');
+  assert(beginnerRun.matches[0].beginnerExplanation !== undefined, 'Matches must include plain-language beginner explanation');
+  logger.info(`[PASS] Beginner prompt successfully translated and returned ${beginnerRun.matches.length} candidates with plain-language explanations.`);
+  logger.info(`Sample beginner explanation: "${beginnerRun.matches[0].beginnerExplanation}"`);
+
+  // Test 6: Ambiguous Query Handling (Spec Section 3.5)
+  const ambiguousQuery = 'hello what is this';
+  const ambiguousFilter = await screenerService.parseQueryToFilter(ambiguousQuery);
+  assert(ambiguousFilter.isAmbiguous === true, 'Ambiguous query must be flagged as ambiguous');
+  assert(Array.isArray(ambiguousFilter.suggestedPrompts) && ambiguousFilter.suggestedPrompts.length > 0, 'Ambiguous query must provide suggested prompts');
+  logger.info(`[PASS] Ambiguous query correctly intercepted with ${ambiguousFilter.suggestedPrompts?.length} suggested prompt chips.`);
+
+  // Test 7: Safe stocks for a beginner query test
+  const safeQuery = 'Show me safe, low-risk stocks with steady profits for a beginner.';
+  const safeFilter = await screenerService.parseQueryToFilter(safeQuery);
+  assert(safeFilter.isBeginnerQuery === true, 'Safe stocks query must be beginner query');
+  assert(safeFilter.debtLevel === 'low', 'Safe stocks query must have low debt constraint');
+  const safeRun = screenerService.runScreener(safeFilter, SCREENER_UNIVERSE);
+  assert(safeRun.matches.length > 0, 'Safe stocks prompt must return matching candidates');
+  logger.info(`[PASS] Safe stocks beginner query matched ${safeRun.matches.length} low-debt candidates.`);
+
+  // Test 8: Which Indian IT companies have steady growth query test
+  const itSteadyQuery = 'Which Indian IT companies have steady growth and low debt?';
+  const itSteadyFilter = await screenerService.parseQueryToFilter(itSteadyQuery);
+  assert(itSteadyFilter.country?.toLowerCase() === 'india', 'Must filter to India');
+  assert(itSteadyFilter.sector?.toUpperCase() === 'IT', 'Must filter to IT');
+  assert(itSteadyFilter.debtLevel === 'low', 'Must filter to low debt');
+  const itSteadyRun = screenerService.runScreener(itSteadyFilter, SCREENER_UNIVERSE);
+  assert(itSteadyRun.matches.length >= 2, 'Must match at least 2 Indian IT companies with low debt');
+  logger.info(`[PASS] Indian IT steady growth query matched ${itSteadyRun.matches.length} candidates.`);
+
   logger.info('=== ALL STOCK SCREENER TESTS PASSED ===');
   process.exit(0);
 }

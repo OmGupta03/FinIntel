@@ -61,6 +61,7 @@ export class ResearchService {
               prevClose: liveQuote.close,
               volume: liveQuote.volume,
               source: 'GROWW_API',
+              lastTradeTime: liveQuote.lastTradeTime,
             };
             if (cachedResult.historicalPrices && cachedResult.historicalPrices.length > 0) {
               const last = cachedResult.historicalPrices[cachedResult.historicalPrices.length - 1];
@@ -71,6 +72,11 @@ export class ResearchService {
             if (cachedResult.intradayPrices && cachedResult.intradayPrices.length > 0) {
               const last = cachedResult.intradayPrices[cachedResult.intradayPrices.length - 1];
               last.close = liveQuote.ltp;
+              last.high = Math.max(last.high || 0, liveQuote.high, liveQuote.ltp);
+              last.low = Math.min(last.low || Infinity, liveQuote.low, liveQuote.ltp);
+              if (liveQuote.lastTradeTime) {
+                last.date = new Date(liveQuote.lastTradeTime * (liveQuote.lastTradeTime < 1e11 ? 1000 : 1)).toISOString();
+              }
             }
           }
         } catch (err: any) {
@@ -145,6 +151,7 @@ export class ResearchService {
       recommendation: '',
       confidenceScore: 0,
       reasoning: '',
+      plainSummary: undefined,
       logs: [],
       currentStep: 'Start',
       error: undefined,
@@ -207,6 +214,32 @@ export class ResearchService {
   }
 
   /**
+   * Retrieves research state from NodeCache or SQLite persistence.
+   */
+  async getReportState(tickerOrQuery: string): Promise<ResearchState | null> {
+    const clean = tickerOrQuery.trim();
+    const cacheKey = this.getCacheKey(clean);
+    const cached = localCache.get<ResearchState>(cacheKey);
+    if (cached) return cached;
+
+    // Check by stripped ticker without exchange suffix if applicable
+    const stripped = clean.replace(/\.NS$/, '').replace(/\.BO$/, '');
+    const cachedStripped = localCache.get<ResearchState>(this.getCacheKey(stripped));
+    if (cachedStripped) return cachedStripped;
+
+    // Check SQLite saved reports
+    const saved = await dbService.getSavedReport(clean);
+    if (saved) return saved as ResearchState;
+
+    if (stripped !== clean) {
+      const savedStripped = await dbService.getSavedReport(stripped);
+      if (savedStripped) return savedStripped as ResearchState;
+    }
+
+    return null;
+  }
+
+  /**
    * Invalidates research cache for a company query.
    */
   clearCache(companyName: string): void {
@@ -217,3 +250,4 @@ export class ResearchService {
 }
 
 export const researchService = new ResearchService();
+

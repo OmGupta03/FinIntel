@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { researchService } from '../services/researchService.js';
 import { yahooFinanceClient } from '../clients/yahooFinance.js';
 import { screenerService } from '../services/screenerService.js';
+import { pdfReportService } from '../services/pdfReportService.js';
 import { logger } from '../middleware/logger.js';
 import { CustomError } from '../middleware/errorHandler.js';
 import { z } from 'zod';
@@ -137,7 +138,19 @@ export class ResearchController {
    */
   async getWatchlist(req: Request, res: Response, next: NextFunction) {
     try {
-      const tickers = ['SBIN.NS', 'RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY', 'TATAMOTORS.NS', 'ICICIBANK.NS'];
+      const tickersQuery = (req.query.tickers || req.query.symbols) as string | undefined;
+      let tickers: string[] = [];
+      if (tickersQuery && typeof tickersQuery === 'string') {
+        tickers = tickersQuery
+          .split(',')
+          .map((t) => t.trim().toUpperCase())
+          .filter(Boolean);
+      }
+
+      if (tickers.length === 0) {
+        return res.status(200).json({ success: true, data: [] });
+      }
+
       const watchlist = await yahooFinanceClient.getWatchlistData(tickers);
       res.status(200).json({ success: true, data: watchlist });
     } catch (err) {
@@ -174,6 +187,55 @@ export class ResearchController {
       }
       const results = await screenerService.runScreenerAsync(filter);
       res.status(200).json({ success: true, data: { ...results, parsedFilter: filter } });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Endpoint: Download research report as a print-friendly PDF.
+   * Suggested in PDF Spec Section 4.5: GET /api/research/:ticker/report/pdf
+   */
+  async downloadReportPdf(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tickerParam = (req.params.ticker || req.query.ticker || req.query.company) as string;
+      if (!tickerParam || typeof tickerParam !== 'string' || tickerParam.trim().length === 0) {
+        throw new CustomError('Ticker parameter is required to download PDF report', 400);
+      }
+
+      const cleanTicker = tickerParam.trim().toUpperCase();
+      logger.info(`PDF generation requested for ticker: ${cleanTicker}`);
+
+      let state = await researchService.getReportState(cleanTicker);
+
+      // If not in cache or db, run on-demand agent to generate state
+      if (!state) {
+        logger.info(`Report not found in cache/history for ${cleanTicker}. Running on-demand analysis...`);
+        const geminiApiKey = (req.headers['x-gemini-api-key'] || req.headers['authorization']) as string | undefined;
+        const tavilyApiKey = req.headers['x-tavily-api-key'] as string | undefined;
+        const growwApiKey = req.headers['x-groww-api-key'] as string | undefined;
+
+        state = await researchService.executeResearchAgent(
+          cleanTicker,
+          geminiApiKey,
+          tavilyApiKey,
+          growwApiKey,
+          () => {},
+          false
+        );
+      }
+
+      if (!state) {
+        throw new CustomError(`Unable to retrieve or generate report for ${cleanTicker}`, 404);
+      }
+
+      const pdfBuffer = await pdfReportService.generateReportPdf(state);
+      const filename = `${state.ticker || cleanTicker}_Research_Report.pdf`;
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+      res.end(pdfBuffer);
     } catch (err) {
       next(err);
     }

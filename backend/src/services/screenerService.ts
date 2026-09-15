@@ -14,6 +14,11 @@ export interface ScreenerFilter {
   debtLevel?: 'low' | 'moderate' | 'high';
   marketCapMin?: number;
   unsupportedFilters?: string[];
+  isBeginnerQuery?: boolean;
+  beginnerGoal?: string;
+  isAmbiguous?: boolean;
+  clarificationMessage?: string;
+  suggestedPrompts?: string[];
 }
 
 export interface ScreenerStockCandidate {
@@ -30,6 +35,8 @@ export interface ScreenerStockCandidate {
   revenueGrowth: number | null;  // as decimal (e.g. 0.12 for 12%)
   debtToEquity: number | null;   // percentage
   profitMargin: number | null;
+  beginnerExplanation?: string;
+  momentumBadge?: string;
 }
 
 export interface ScreenerRunResult {
@@ -367,10 +374,32 @@ export function matchesFilter(candidate: ScreenerStockCandidate, filter: Screene
 export class ScreenerService {
   /**
    * Parses natural language queries into structured ScreenerFilter using LLM with deterministic regex fallback.
+   * Handles dual-mode inputs: technical constraints (ROE, P/E) and casual/beginner prompts ("growing stocks", "good returns in 1 month").
    */
   async parseQueryToFilter(query: string, geminiApiKey?: string): Promise<ScreenerFilter> {
-    const queryLower = query.toLowerCase();
+    const trimmed = query.trim();
+    const queryLower = trimmed.toLowerCase();
     const unsupported: string[] = [];
+
+    // Ambiguity detection: check if query is completely devoid of financial or business intent
+    const isObviousNonsense = (
+      trimmed.length < 3 ||
+      /^(hi|hello|hey|help|test|what|why|who|how are you|weather|ok|cool|asdf)\b/i.test(trimmed)
+    ) && !/(stock|company|market|roe|pe|debt|grow|tech|it|bank|return|invest)/i.test(queryLower);
+
+    if (isObviousNonsense) {
+      return {
+        isAmbiguous: true,
+        clarificationMessage: 'We could not detect financial criteria in your query. Please pick from one of our beginner-friendly screener prompts below or describe what you want in simple words:',
+        suggestedPrompts: [
+          'Find me stocks which are currently growing and give good returns in 1 month.',
+          'Show me safe, low-risk stocks with steady profits for a beginner.',
+          'Show me stocks that have been growing steadily this month.',
+          'Which Indian IT companies have steady growth and low debt?',
+          'High-quality market leaders with strong earnings and safe balance sheets.',
+        ],
+      };
+    }
 
     // Detect unsupported requests in natural language
     if (queryLower.includes('insider trading') || queryLower.includes('congress buying')) {
@@ -380,10 +409,33 @@ export class ScreenerService {
       unsupported.push('Real-time sentiment score screener filtering is available in single-stock mode.');
     }
 
+    // Detect casual / beginner prompts
+    const isBeginnerPrompt = (
+      queryLower.includes('currently growing') ||
+      queryLower.includes('growing steadily') ||
+      queryLower.includes('good returns') ||
+      queryLower.includes('1 month') ||
+      queryLower.includes('one month') ||
+      queryLower.includes('beginner') ||
+      queryLower.includes('safe') ||
+      queryLower.includes('steady') ||
+      queryLower.includes('high-quality') ||
+      queryLower.includes('high quality') ||
+      queryLower.includes('market leader') ||
+      queryLower.includes('strong earnings')
+    );
+
     if (geminiApiKey || process.env.GEMINI_API_KEY) {
       try {
         const model = llmClient.getModel(geminiApiKey);
-        const prompt = `You are a financial screener query parser. Convert the user's natural-language stock search into a structured filter object.
+        const prompt = `You are a financial screener query parser for AlphaInsight AI. Convert the user's natural-language stock search into a structured filter object.
+
+We support two tiers of queries:
+1. Technical/precise prompts with explicit numbers (e.g., "ROE above 15%", "P/E below 30", "revenue growth above 10%").
+2. Casual/beginner prompts with everyday language (e.g., "Find me stocks which are currently growing and give good returns in 1 month", "Show me safe, low-risk stocks with steady profits for a beginner", "steady growth").
+   For casual/beginner queries:
+   - "currently growing" / "growing steadily" / "good returns in 1 month" -> map to "revenueGrowthMin": 8, "roeMin": 15, "debtLevel": "low", and "isBeginnerQuery": true.
+   - "safe stocks" / "low-risk" -> map to "debtLevel": "low", "roeMin": 12, "peMax": 35, and "isBeginnerQuery": true.
 
 User Query: "${query}"
 
@@ -395,7 +447,8 @@ Output ONLY a JSON object matching this schema without markdown code blocks:
   "revenueGrowthMin": 10, // number (percentage points, e.g. 10 for 10%) or omit
   "peMax": 30, // number max P/E or omit
   "peMin": 5, // number min P/E or omit
-  "debtLevel": "low" // "low" | "moderate" | "high" or omit
+  "debtLevel": "low", // "low" | "moderate" | "high" or omit
+  "isBeginnerQuery": true // boolean if casual/beginner prompt, or false/omit
 }`;
 
         const res = await model.invoke(prompt);
@@ -406,6 +459,8 @@ Output ONLY a JSON object matching this schema without markdown code blocks:
         const parsed = JSON.parse(content);
         return {
           ...parsed,
+          isBeginnerQuery: parsed.isBeginnerQuery ?? isBeginnerPrompt,
+          beginnerGoal: isBeginnerPrompt ? 'Positive momentum, solid capital efficiency (ROE), and steady top-line growth' : undefined,
           unsupportedFilters: unsupported.length > 0 ? unsupported : undefined,
         };
       } catch (err: any) {
@@ -416,6 +471,14 @@ Output ONLY a JSON object matching this schema without markdown code blocks:
     // Deterministic Rule-based Regex Parser (Guaranteed fallback and unit-testable)
     const filter: ScreenerFilter = {};
 
+    if (isBeginnerPrompt) {
+      filter.isBeginnerQuery = true;
+      filter.beginnerGoal = 'Short-term momentum & capital return efficiency over recent trading periods';
+      filter.revenueGrowthMin = 8; // At least 8% growth
+      filter.roeMin = 15; // At least 15% ROE
+      filter.debtLevel = 'low'; // Low debt for safety
+    }
+
     // Sector detection
     if (queryLower.includes('it ') || queryLower.includes('tech') || queryLower.includes('software')) filter.sector = 'IT';
     else if (queryLower.includes('bank') || queryLower.includes('financial')) filter.sector = 'Financials';
@@ -425,11 +488,11 @@ Output ONLY a JSON object matching this schema without markdown code blocks:
     if (queryLower.includes('india') || queryLower.includes('indian')) filter.country = 'India';
     else if (queryLower.includes('us') || queryLower.includes('usa') || queryLower.includes('american')) filter.country = 'USA';
 
-    // ROE detection
+    // ROE detection (explicit overrides beginner default)
     const roeMatch = queryLower.match(/roe\s*(?:above|>|over|greater than|min|>=)?\s*(\d+(?:\.\d+)?)\s*%?/);
     if (roeMatch) filter.roeMin = parseFloat(roeMatch[1]);
 
-    // Revenue growth detection
+    // Revenue growth detection (explicit overrides beginner default)
     const revMatch = queryLower.match(/(?:revenue|sales)\s*(?:growth)?\s*(?:above|>|over|greater than|min|>=)?\s*(\d+(?:\.\d+)?)\s*%?/);
     if (revMatch) filter.revenueGrowthMin = parseFloat(revMatch[1]);
 
@@ -528,6 +591,27 @@ Output ONLY a JSON object matching this schema without markdown code blocks:
       return revB - revA;
     });
 
+    // Populate beginner-friendly plain language explanations and momentum badges
+    const enrichedMatches = matches.map((cand) => {
+      const growthPct = cand.revenueGrowth !== null ? (cand.revenueGrowth * 100).toFixed(1) + '%' : 'steady';
+      const roePct = cand.roe !== null ? (cand.roe * 100).toFixed(0) + '%' : 'healthy';
+      const peStr = cand.peRatio !== null ? `${cand.peRatio.toFixed(1)}x P/E` : 'fair multiple';
+      const debtDesc = cand.debtToEquity !== null && cand.debtToEquity <= 50 ? 'virtually zero debt' : 'manageable debt';
+
+      const explanation = `${cand.name} demonstrates solid upward operational momentum with ${growthPct} top-line growth, outstanding capital return efficiency (${roePct} ROE), and ${debtDesc} at ${peStr}.`;
+
+      let badge = 'Steady Compounder';
+      if (cand.revenueGrowth && cand.revenueGrowth > 0.15) badge = 'High Growth';
+      else if (cand.roe && cand.roe > 0.25) badge = 'Quality Leader';
+      else if (cand.debtToEquity !== null && cand.debtToEquity < 20) badge = 'Low Risk / High Safety';
+
+      return {
+        ...cand,
+        beginnerExplanation: explanation,
+        momentumBadge: badge,
+      };
+    });
+
     let message: string | undefined;
     if (filter.unsupportedFilters && filter.unsupportedFilters.length > 0) {
       message = `Notice: ${filter.unsupportedFilters.join(' ')}`;
@@ -535,10 +619,12 @@ Output ONLY a JSON object matching this schema without markdown code blocks:
 
     return {
       parsedFilter: filter,
-      matches,
+      matches: enrichedMatches,
       totalEvaluated: universe.length,
       unsupportedCriteriaMessage: message,
-      rankingBasis: 'Ranked deterministically by Return on Equity (ROE) and Revenue Growth.',
+      rankingBasis: filter.isBeginnerQuery
+        ? 'Ranked deterministically by short-term momentum, operating revenue growth, and Return on Equity.'
+        : 'Ranked deterministically by Return on Equity (ROE) and Revenue Growth.',
     };
   }
 }

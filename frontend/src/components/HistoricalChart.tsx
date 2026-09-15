@@ -93,6 +93,7 @@ interface HistoricalChartProps {
   dayChange?: number;
   dayChangePercent?: number;
   prevClose?: number;
+  simpleMode?: boolean;
 }
 
 export const HistoricalChart: React.FC<HistoricalChartProps> = ({
@@ -104,6 +105,7 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
   dayChange,
   dayChangePercent,
   prevClose,
+  simpleMode = false,
 }) => {
   const activeCurrencySymbol = '₹';
   const [activeRange, setActiveRange] = useState<TimeRange>('1Y');
@@ -118,10 +120,13 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
         const lastDate = intradayData[intradayData.length - 1].date.split('T')[0];
         const latestSessionBars = intradayData.filter((b) => b.date.startsWith(lastDate));
         if (latestSessionBars.length >= 2) {
-          return latestSessionBars.map((b) => {
+          return latestSessionBars.map((b, idx, arr) => {
+            const isLast = idx === arr.length - 1;
+            const barClose = (isLast && currentPrice && currentPrice > 0) ? currentPrice : b.close;
             const d = new Date(b.date);
             return {
               ...b,
+              close: barClose,
               displayTick: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
               fullDate: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ` (${d.toLocaleDateString()})`,
             };
@@ -326,41 +331,42 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
               <span>{rangeTitleMap[activeRange]} ({ticker})</span>
             </h3>
           </div>
-          <div className="flex items-baseline space-x-2 mt-1">
-            <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
+          <div className="flex items-baseline space-x-2.5 mt-1">
+            <span className="text-2xl font-bold text-slate-800 font-sans tracking-tight">
               {activeCurrencySymbol}{activePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
-            <span className={`text-xs font-mono font-bold flex items-center gap-1 ${isUp ? 'text-emerald-600' : 'text-rose-600'}`}>
-              <span>{isUp ? '▲ +' : '▼ '}{Math.abs(percentChange).toFixed(2)}% ({activeRange})</span>
-              <span className="opacity-80 text-[11px]">
-                ({priceChange >= 0 ? '+' : '-'}{activeCurrencySymbol}{Math.abs(priceChange).toFixed(2)})
-              </span>
-            </span>
+            <div className={`flex items-baseline space-x-1.5 text-sm font-semibold font-sans ${isUp ? 'text-emerald-600' : 'text-[#eb5b3c]'}`}>
+              <span>{priceChange >= 0 ? '+' : '-'}{Math.abs(priceChange).toFixed(2)}</span>
+              <span>({Math.abs(percentChange).toFixed(2)}%)</span>
+              <span className="text-slate-400 font-normal text-xs">{activeRange}</span>
+            </div>
           </div>
         </div>
 
-        {/* Action Controls: SMA Toggle & RSI Badge */}
-        <div className="flex items-center space-x-2 font-mono text-[10px]">
-          {canShowSMA && (
-            <button
-              type="button"
-              onClick={() => setShowSMA(!showSMA)}
-              className={`px-3 py-1 rounded-full border font-semibold transition-colors cursor-pointer ${
-                showSMA
-                  ? 'bg-blue-50 text-blue-700 border-blue-200'
-                  : 'bg-slate-100 text-slate-600 border-gray-200 hover:bg-slate-200'
-              }`}
-            >
-              {showSMA ? 'Hide SMAs' : 'Show SMAs (20/50)'}
-            </button>
-          )}
+        {/* Action Controls: SMA Toggle & RSI Badge (Hidden in Simple Mode) */}
+        {!simpleMode && (
+          <div className="flex items-center space-x-2 font-mono text-[10px]">
+            {canShowSMA && (
+              <button
+                type="button"
+                onClick={() => setShowSMA(!showSMA)}
+                className={`px-3 py-1 rounded-full border font-semibold transition-colors cursor-pointer ${
+                  showSMA
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : 'bg-slate-100 text-slate-600 border-gray-200 hover:bg-slate-200'
+                }`}
+              >
+                {showSMA ? 'Hide SMAs' : 'Show SMAs (20/50)'}
+              </button>
+            )}
 
-          {technicalAnalysis?.rsi14?.value != null && (
-            <span className="bg-slate-100 text-slate-700 border border-gray-200 px-3 py-1 rounded-full font-semibold">
-              RSI: <strong className="text-slate-900">{technicalAnalysis.rsi14.value}</strong>
-            </span>
-          )}
-        </div>
+            {technicalAnalysis?.rsi14?.value != null && (
+              <span className="bg-slate-100 text-slate-700 border border-gray-200 px-3 py-1 rounded-full font-semibold">
+                RSI: <strong className="text-slate-900">{technicalAnalysis.rsi14.value}</strong>
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Timeline Pill Selector (1D, 1W, 1M, 3M, 6M, 1Y, 3Y, 5Y, All) */}
@@ -384,73 +390,83 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
         })}
       </div>
 
-      {/* Chart Canvas */}
-      <div className="h-68 w-full font-mono text-[10px] mt-1">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={chartData}
-            margin={{ top: 10, right: 10, left: -15, bottom: 5 }}
-          >
-            <defs>
-              <linearGradient id="colorPriceGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={isUp ? '#2563eb' : '#e11d48'} stopOpacity={0.25} />
-                <stop offset="95%" stopColor={isUp ? '#2563eb' : '#e11d48'} stopOpacity={0.0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis
-              dataKey="displayTick"
-              stroke="#94a3b8"
-              tickLine={false}
-              axisLine={{ stroke: '#f1f5f9' }}
-              tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'monospace' }}
-              dy={10}
-              minTickGap={50}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              domain={[minPrice, maxPrice]}
-              stroke="#94a3b8"
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'monospace' }}
-              tickFormatter={(val) => `${activeCurrencySymbol}${val}`}
-            />
-            <Tooltip content={<ChartTooltip currencySymbol={activeCurrencySymbol} />} />
-            <Area
-              type="monotone"
-              dataKey="close"
-              stroke={isUp ? '#2563eb' : '#e11d48'}
-              strokeWidth={2}
-              fillOpacity={1}
-              fill="url(#colorPriceGradient)"
-            />
-            {showSMA && canShowSMA && (
-              <>
-                <Line
-                  type="monotone"
-                  dataKey="sma20"
-                  stroke="#d97706"
-                  strokeWidth={1.5}
-                  dot={false}
-                  name="SMA 20"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="sma50"
-                  stroke="#9333ea"
-                  strokeWidth={1.5}
-                  dot={false}
-                  name="SMA 50"
-                />
-              </>
-            )}
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Chart Canvas or Graceful Empty State */}
+      {chartData.length < 2 ? (
+        <div className="h-48 w-full flex flex-col items-center justify-center border border-dashed border-gray-200 rounded-lg p-6 text-center space-y-2 mt-2 bg-slate-50/50">
+          <TrendingUp className="w-6 h-6 text-slate-300" />
+          <p className="text-xs font-bold text-slate-700 font-mono">Limited Price History</p>
+          <p className="text-[11px] text-slate-500 max-w-sm font-sans">
+            Historical charting data is currently limited for this ticker. Live pricing and valuation metrics remain available above.
+          </p>
+        </div>
+      ) : (
+        <div className="h-68 w-full font-mono text-[10px] mt-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart
+              data={chartData}
+              margin={{ top: 10, right: 10, left: -15, bottom: 5 }}
+            >
+              <defs>
+                <linearGradient id="colorPriceGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={isUp ? '#2563eb' : '#e11d48'} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={isUp ? '#2563eb' : '#e11d48'} stopOpacity={0.0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="displayTick"
+                stroke="#94a3b8"
+                tickLine={false}
+                axisLine={{ stroke: '#f1f5f9' }}
+                tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'monospace' }}
+                dy={10}
+                minTickGap={50}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                domain={[minPrice, maxPrice]}
+                stroke="#94a3b8"
+                tickLine={false}
+                axisLine={false}
+                tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'monospace' }}
+                tickFormatter={(val) => `${activeCurrencySymbol}${val}`}
+              />
+              <Tooltip content={<ChartTooltip currencySymbol={activeCurrencySymbol} />} />
+              <Area
+                type="monotone"
+                dataKey="close"
+                stroke={isUp ? '#2563eb' : '#e11d48'}
+                strokeWidth={2}
+                fillOpacity={1}
+                fill="url(#colorPriceGradient)"
+              />
+              {!simpleMode && showSMA && canShowSMA && (
+                <>
+                  <Line
+                    type="monotone"
+                    dataKey="sma20"
+                    stroke="#d97706"
+                    strokeWidth={1.5}
+                    dot={false}
+                    name="SMA 20"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="sma50"
+                    stroke="#9333ea"
+                    strokeWidth={1.5}
+                    dot={false}
+                    name="SMA 50"
+                  />
+                </>
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
-      {/* Chart Legend */}
-      {showSMA && canShowSMA && (
+      {/* Chart Legend (Hidden in Simple Mode) */}
+      {!simpleMode && showSMA && canShowSMA && (
         <div className="flex items-center justify-end space-x-4 pt-2.5 font-mono text-[10px] text-slate-500 border-t border-gray-100 mt-2">
           <span className="flex items-center space-x-1.5">
             <span className={`w-2.5 h-0.5 ${isUp ? 'bg-blue-600' : 'bg-rose-600'} inline-block rounded`}></span>

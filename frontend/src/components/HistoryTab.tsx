@@ -20,7 +20,48 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({ onViewReport }) => {
   const [historyData, setHistoryData] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  const [downloadingTicker, setDownloadingTicker] = useState<string | null>(null);
   const itemsPerPage = 5;
+
+  const handleDownloadPdf = async (ticker: string) => {
+    if (downloadingTicker) return;
+    setDownloadingTicker(ticker);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const geminiKey = typeof window !== 'undefined' ? localStorage.getItem('geminiApiKey') || '' : '';
+      const tavilyKey = typeof window !== 'undefined' ? localStorage.getItem('tavilyApiKey') || '' : '';
+      const growwKey = typeof window !== 'undefined' ? localStorage.getItem('growwApiKey') || '' : '';
+
+      const headers: Record<string, string> = {};
+      if (geminiKey.trim()) headers['x-gemini-api-key'] = geminiKey.trim();
+      if (tavilyKey.trim()) headers['x-tavily-api-key'] = tavilyKey.trim();
+      if (growwKey.trim()) headers['x-groww-api-key'] = growwKey.trim();
+
+      const res = await fetch(`${apiUrl}/api/research/${encodeURIComponent(ticker)}/report/pdf`, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to download report (status ${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `${ticker}_Research_Report.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('PDF Download Error:', err);
+      alert('Unable to generate PDF report from history at this time.');
+    } finally {
+      setDownloadingTicker(null);
+    }
+  };
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -167,12 +208,29 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({ onViewReport }) => {
                       {item.confidenceScore.toFixed(1)}%
                     </td>
                     <td className="py-4.5 px-6 text-right">
-                      <button
-                        onClick={() => onViewReport(item.ticker)}
-                        className="bg-slate-950 hover:bg-slate-900 text-white font-mono text-[10px] font-bold py-2 px-4 rounded-lg transition-colors cursor-pointer border border-transparent shadow-sm"
-                      >
-                        View Full Report
-                      </button>
+                      <div className="inline-flex items-center justify-end space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadPdf(item.ticker)}
+                          disabled={downloadingTicker === item.ticker}
+                          className="bg-white hover:bg-slate-50 text-slate-700 border border-gray-200 font-mono text-[10px] font-bold py-2 px-3 rounded-lg transition-colors cursor-pointer shadow-2xs inline-flex items-center space-x-1 disabled:opacity-50"
+                          title="Download stored research report as PDF"
+                        >
+                          {downloadingTicker === item.ticker ? (
+                            <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
+                          ) : (
+                            <Download className="w-3 h-3 text-slate-500" />
+                          )}
+                          <span>{downloadingTicker === item.ticker ? 'Exporting...' : 'PDF'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onViewReport(item.ticker)}
+                          className="bg-slate-950 hover:bg-slate-900 text-white font-mono text-[10px] font-bold py-2 px-3.5 rounded-lg transition-colors cursor-pointer border border-transparent shadow-xs"
+                        >
+                          View Report
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

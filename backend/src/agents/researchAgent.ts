@@ -50,6 +50,10 @@ export const ResearchStateAnnotation = Annotation.Root({
   recommendation: Annotation<string>(), // 'BUY' | 'HOLD' | 'SELL'
   confidenceScore: Annotation<number>(),
   reasoning: Annotation<string>(),
+  plainSummary: Annotation<string | undefined>({
+    reducer: (x, y) => y ?? x,
+    default: () => undefined,
+  }),
   logs: Annotation<string[]>({
     reducer: (x, y) => x.concat(y),
     default: () => [],
@@ -125,6 +129,7 @@ const fetchDataNode = async (state: ResearchState) => {
         overview.prevClose = growwQuote.close;
         overview.volume = growwQuote.volume;
         overview.source = 'GROWW_API';
+        overview.lastTradeTime = growwQuote.lastTradeTime;
         logs.push(`[GROWW LIVE FEED] Fetched real-time quote from Groww on NSE: ₹${growwQuote.ltp} (Day Change: ${growwQuote.dayChangePercent >= 0 ? '+' : ''}${growwQuote.dayChangePercent.toFixed(2)}%)`);
       }
 
@@ -192,11 +197,41 @@ const fetchDataNode = async (state: ResearchState) => {
         });
       }
 
+      // Synchronize live intraday bar with exact live trade time from Groww
+      const nowIso = new Date().toISOString();
+      const tradeTimeIso = growwQuote.lastTradeTime
+        ? new Date(growwQuote.lastTradeTime * (growwQuote.lastTradeTime < 1e11 ? 1000 : 1)).toISOString()
+        : nowIso;
+
       if (intradayPrices.length > 0) {
         const lastIntra = intradayPrices[intradayPrices.length - 1];
-        lastIntra.close = growwQuote.ltp;
-        lastIntra.high = Math.max(lastIntra.high || 0, growwQuote.high);
-        lastIntra.low = Math.min(lastIntra.low || Infinity, growwQuote.low);
+        const lastTime = new Date(lastIntra.date).getTime();
+        const tradeTime = new Date(tradeTimeIso).getTime();
+
+        if (Math.abs(tradeTime - lastTime) < 5 * 60 * 1000) {
+          lastIntra.close = growwQuote.ltp;
+          lastIntra.high = Math.max(lastIntra.high || 0, growwQuote.high, growwQuote.ltp);
+          lastIntra.low = Math.min(lastIntra.low || Infinity, growwQuote.low, growwQuote.ltp);
+          lastIntra.date = tradeTimeIso;
+        } else {
+          intradayPrices.push({
+            date: tradeTimeIso,
+            close: growwQuote.ltp,
+            open: lastIntra.close || growwQuote.ltp,
+            high: Math.max(growwQuote.ltp, growwQuote.high || growwQuote.ltp),
+            low: Math.min(growwQuote.ltp, growwQuote.low || growwQuote.ltp),
+            volume: growwQuote.volume,
+          });
+        }
+      } else {
+        intradayPrices.push({
+          date: tradeTimeIso,
+          close: growwQuote.ltp,
+          open: growwQuote.open || growwQuote.ltp,
+          high: growwQuote.high || growwQuote.ltp,
+          low: growwQuote.low || growwQuote.ltp,
+          volume: growwQuote.volume,
+        });
       }
     }
 
@@ -562,12 +597,20 @@ const synthesizeRecommendationNode = async (state: ResearchState) => {
 
       const reasoning = `The investment committee establishes a ${rec} rating for ${state.resolvedName} (${ticker}). The ${strongerCase} case carries greater empirical weight grounded in a Stock Health Score of ${healthScore}/100. Key strengths in capital efficiency and market leadership outweigh valuation headwinds, though macro risks warrant prudent position sizing.`;
 
+      const plainSummary =
+        rec === 'BUY'
+          ? `${state.resolvedName} demonstrates sound business fundamentals and consistent profitability, making it an attractive consideration for long-term investors.`
+          : rec === 'HOLD'
+          ? `${state.resolvedName} shows stable business operations, but mixed growth indicators suggest a patient wait-and-see approach.`
+          : `${state.resolvedName} currently faces noticeable profitability or market valuation challenges, warranting caution before investing.`;
+
       return {
         bullCase,
         bearCase,
         recommendation: rec,
         confidenceScore: healthScore,
         reasoning,
+        plainSummary,
         currentStep: 'Synthesize Recommendation',
         logs: [
           ...logs,
@@ -592,7 +635,11 @@ Construct:
 1. Bull Case: exactly 2-3 concrete, data-grounded points supporting upside catalysts and strengths.
 2. Bear Case: exactly 2-3 concrete, data-grounded points supporting downside risks, valuation friction, and weaknesses.
 3. Final Recommendation: exactly BUY, HOLD, or SELL with conviction score (0-100).
-4. Investment Thesis Reasoning: Must explicitly state which case (Bull or Bear) currently has stronger evidence and why, referencing the deterministic health score (${healthScore}/100), fundamentals, and technicals.
+5. Plain Summary: Exactly 1-2 complete, grammatical sentences written for a first-time beginner investor.
+   CRITICAL JARGON RULES FOR PLAIN SUMMARY:
+   - Absolutely FORBIDDEN terms: P/E, ROE, ROA, RSI, MACD, EBITDA, EPS, SMA, EMA, moving average, multiple, volatility, beta, margin compression, valuation discount, or any raw technical ratio.
+   - Use plain everyday concepts like "steady customer demand", "consistent profits", "sound financial footing", "high debt burden", "slowing sales", or "higher risk of short-term price drops".
+   - Must clearly reflect whether the company's financial position is strong, moderate, or risky, and align with the final recommendation.
 
 Important: All currency values, target prices, or monetary figures must use the "${state.overview?.currencySymbol || '₹'}" symbol (${state.overview?.currency || 'INR'}). NEVER use "$".
 
@@ -602,7 +649,8 @@ Return ONLY a valid JSON object matching this schema without markdown code block
   "bearCase": ["point 1 with hard numbers", "point 2 with hard numbers", "point 3 with hard numbers"],
   "recommendation": "BUY", // BUY | HOLD | SELL
   "confidenceScore": 84, // 0-100
-  "reasoning": "A paragraph explaining which case has stronger evidence and why, referencing the deterministic data."
+  "reasoning": "A paragraph explaining which case has stronger evidence and why, referencing the deterministic data.",
+  "plainSummary": "A 1-2 sentence plain-English summary for a beginner explaining the takeaway without any jargon."
 }`;
 
     const response = await model.invoke(prompt);
@@ -617,6 +665,11 @@ Return ONLY a valid JSON object matching this schema without markdown code block
     const bullCase = rawBull.map(sanitizeCurrency);
     const bearCase = rawBear.map(sanitizeCurrency);
     const reasoning = sanitizeCurrency(decision.reasoning || `Investment thesis synthesized for ${ticker} based on ${healthScore}/100 health score.`);
+    const plainSummary = decision.plainSummary
+      ? sanitizeCurrency(decision.plainSummary)
+      : decision.recommendation === 'BUY'
+      ? `${state.resolvedName} shows healthy financial fundamentals and positive market momentum for long-term investors.`
+      : `${state.resolvedName} presents balanced signals; waiting for stronger entry conditions may be prudent.`;
 
     return {
       bullCase,
@@ -624,6 +677,7 @@ Return ONLY a valid JSON object matching this schema without markdown code block
       recommendation: decision.recommendation || (healthScore >= 70 ? 'BUY' : 'HOLD'),
       confidenceScore: typeof decision.confidenceScore === 'number' ? decision.confidenceScore : healthScore,
       reasoning,
+      plainSummary,
       currentStep: 'Synthesize Recommendation',
       logs: [
         ...logs,

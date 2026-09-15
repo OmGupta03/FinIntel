@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { Navbar } from '../components/Navbar';
 import { Dashboard } from '../components/Dashboard';
@@ -12,7 +12,8 @@ import { HistoryTab } from '../components/HistoryTab';
 import { WatchlistTab } from '../components/WatchlistTab';
 import { SettingsTab } from '../components/SettingsTab';
 import { ResearchConsole } from '../components/ResearchConsole';
-import { Search, Loader2, RefreshCw, ShieldCheck, Activity, Users } from 'lucide-react';
+import { Search, Loader2, RefreshCw, ShieldCheck, Activity, Users, Star } from 'lucide-react';
+import { isInWatchlist, toggleWatchlist, subscribeWatchlist, getWatchlist } from '../utils/watchlist';
 
 export interface SwotAnalysis {
   strengths: string[];
@@ -28,6 +29,13 @@ export interface ResearchReport extends DashboardReport {
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'research' | 'screener' | 'history' | 'watchlist' | 'settings'>('research');
   const [query, setQuery] = useState('');
+  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
+
+  useEffect(() => {
+    setWatchlistSymbols(getWatchlist());
+    const unsub = subscribeWatchlist((symbols) => setWatchlistSymbols(symbols));
+    return () => unsub();
+  }, []);
   const [isResearching, setIsResearching] = useState(false);
   const [currentStep, setCurrentStep] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
@@ -138,6 +146,7 @@ export default function Home() {
                   recommendation: '',
                   confidenceScore: 0,
                   reasoning: '',
+                  plainSummary: undefined,
                 };
 
                 return {
@@ -285,17 +294,34 @@ export default function Home() {
                   <div className="flex flex-wrap items-center justify-center gap-3.5 pt-2">
                     <span className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-wider">Trending Equities</span>
                     {trendingCompanies.map((c) => (
-                      <button
+                      <div
                         key={c.ticker}
-                        type="button"
-                        onClick={() => startResearch(c.ticker)}
-                        className="bg-white hover:bg-slate-50 text-slate-700 border border-gray-200 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer shadow-sm flex items-center space-x-1.5"
+                        className="bg-white hover:bg-slate-50 text-slate-700 border border-gray-200 pl-3 pr-2 py-1.5 rounded-full text-xs font-semibold transition-all shadow-sm flex items-center space-x-2 group"
                       >
-                        <span className="font-bold">{c.ticker}</span>
-                        <span className={`text-[10px] font-mono font-bold ${c.isUp ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {c.isUp ? '▲' : '▼'} {c.change.replace(/[+-]/, '')}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => startResearch(c.ticker)}
+                          className="flex items-center space-x-1.5 cursor-pointer hover:text-blue-600 transition-colors"
+                        >
+                          <span className="font-bold">{c.ticker}</span>
+                          <span className={`text-[10px] font-mono font-bold ${c.isUp ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {c.isUp ? '▲' : '▼'} {c.change.replace(/[+-]/, '')}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleWatchlist(c.ticker);
+                          }}
+                          className={`p-0.5 rounded-full hover:bg-slate-100 transition-colors cursor-pointer ${
+                            isInWatchlist(c.ticker) ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'
+                          }`}
+                          title={isInWatchlist(c.ticker) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                        >
+                          <Star className={`w-3 h-3 ${isInWatchlist(c.ticker) ? 'fill-amber-400' : ''}`} />
+                        </button>
+                      </div>
                     ))}
                   </div>
 
@@ -432,7 +458,10 @@ export default function Home() {
           )}
 
           {activeTab === 'watchlist' && (
-            <WatchlistTab />
+            <WatchlistTab
+              onSelectTicker={(t) => startResearch(t)}
+              onGoToResearch={() => setActiveTab('research')}
+            />
           )}
 
           {activeTab === 'settings' && (

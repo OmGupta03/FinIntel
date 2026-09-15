@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
-import { Users, Award } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Users, Award, Star } from 'lucide-react';
+import { isInWatchlist, toggleWatchlist, subscribeWatchlist, getWatchlist } from '../utils/watchlist';
 
 export interface PeerRow {
   ticker: string;
@@ -41,6 +42,13 @@ export const CompetitorTable: React.FC<CompetitorTableProps> = ({
   onSelectPeer,
 }) => {
   const activeCurrencySymbol = '₹';
+  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
+
+  useEffect(() => {
+    setWatchlistSymbols(getWatchlist());
+    const unsub = subscribeWatchlist((symbols) => setWatchlistSymbols(symbols));
+    return () => unsub();
+  }, []);
 
   if (!competitors || !competitors.peers || competitors.peers.length === 0) {
     return (
@@ -136,6 +144,21 @@ export const CompetitorTable: React.FC<CompetitorTableProps> = ({
                   >
                     <td className="py-3 px-4">
                       <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleWatchlist(p.ticker);
+                          }}
+                          className={`p-1 rounded transition-colors cursor-pointer ${
+                            isInWatchlist(p.ticker)
+                              ? 'text-amber-500 hover:text-amber-600'
+                              : 'text-slate-300 hover:text-amber-500'
+                          }`}
+                          title={isInWatchlist(p.ticker) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                        >
+                          <Star className={`w-3.5 h-3.5 ${isInWatchlist(p.ticker) ? 'fill-amber-400' : ''}`} />
+                        </button>
                         <span className="text-slate-900 font-extrabold">{p.ticker}</span>
                         {isTarget && (
                           <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.2 rounded uppercase">

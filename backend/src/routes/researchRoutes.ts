@@ -34,4 +34,15 @@ router.post('/screener/run', (req, res, next) => {
   researchController.runScreener(req, res, next);
 });
 
+// Downloadable PDF Stock Report endpoints (Feature Spec Addendum Section 4.5)
+router.get('/:ticker/report/pdf', (req, res, next) => {
+  researchController.downloadReportPdf(req, res, next);
+});
+router.get('/report/pdf', (req, res, next) => {
+  researchController.downloadReportPdf(req, res, next);
+});
+router.get('/pdf', (req, res, next) => {
+  researchController.downloadReportPdf(req, res, next);
+});
+
 export default router;

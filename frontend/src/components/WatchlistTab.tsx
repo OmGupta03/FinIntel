@@ -1,7 +1,23 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Download, Filter, TrendingUp, TrendingDown, Sparkles, Loader2 } from 'lucide-react';
+import {
+  Download,
+  TrendingUp,
+  TrendingDown,
+  Loader2,
+  Trash2,
+  ArrowUpRight,
+  Star,
+  Search,
+  RefreshCw,
+} from 'lucide-react';
+import {
+  getWatchlist,
+  removeFromWatchlist,
+  clearWatchlist,
+  subscribeWatchlist,
+} from '../utils/watchlist';
 
 interface WatchlistItem {
   symbol: string;
@@ -14,19 +30,46 @@ interface WatchlistItem {
   currencySymbol?: string;
 }
 
-export const WatchlistTab: React.FC = () => {
-  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
-  const [loading, setLoading] = useState(true);
+interface WatchlistTabProps {
+  onSelectTicker?: (ticker: string) => void;
+  onGoToResearch?: () => void;
+}
 
+export const WatchlistTab: React.FC<WatchlistTabProps> = ({
+  onSelectTicker,
+  onGoToResearch,
+}) => {
+  const [savedSymbols, setSavedSymbols] = useState<string[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Initialize saved symbols from localStorage & listen for global updates
   useEffect(() => {
+    setSavedSymbols(getWatchlist());
+    const unsubscribe = subscribeWatchlist((symbols) => {
+      setSavedSymbols(symbols);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch real-time data whenever savedSymbols change
+  useEffect(() => {
+    if (savedSymbols.length === 0) {
+      setWatchlist([]);
+      setLoading(false);
+      return;
+    }
+
     const fetchWatchlist = async () => {
+      setLoading(true);
       try {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-        const res = await fetch(`${apiUrl}/api/research/watchlist`);
+        const res = await fetch(
+          `${apiUrl}/api/research/watchlist?tickers=${encodeURIComponent(savedSymbols.join(','))}`
+        );
         if (res.ok) {
           const result = await res.json();
           if (result.success && Array.isArray(result.data)) {
-            // Map quotes from backend and inject sentiments
             const mapped = result.data.map((item: WatchlistItem) => {
               let sentiment: 'Bullish' | 'Bearish' | 'Neutral' = 'Neutral';
               if (item.changePercent > 0.5) {
@@ -34,7 +77,7 @@ export const WatchlistTab: React.FC = () => {
               } else if (item.changePercent < -0.5) {
                 sentiment = 'Bearish';
               }
-              
+
               return {
                 ...item,
                 sentiment,
@@ -53,7 +96,37 @@ export const WatchlistTab: React.FC = () => {
     };
 
     fetchWatchlist();
-  }, []);
+  }, [savedSymbols]);
+
+  const handleRemoveTicker = (symbol: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    removeFromWatchlist(symbol);
+  };
+
+  const handleClearAll = () => {
+    if (window.confirm('Are you sure you want to empty your entire watchlist?')) {
+      clearWatchlist();
+    }
+  };
+
+  const handleExportCSV = () => {
+    if (watchlist.length === 0) return;
+    const headers = 'Symbol,Name,Exchange,Price,24h Change (%),Sentiment\n';
+    const rows = watchlist
+      .map(
+        (w) =>
+          `"${w.symbol}","${w.name}","${w.exchange || ''}",${w.price},${w.changePercent.toFixed(2)},"${w.sentiment || ''}"`
+      )
+      .join('\n');
+    const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `FinIntel_Watchlist_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const getSentimentStyles = (sentiment: 'Bullish' | 'Bearish' | 'Neutral') => {
     switch (sentiment) {
@@ -84,205 +157,194 @@ export const WatchlistTab: React.FC = () => {
 
   const formatChange = (change: number) => {
     const sign = change >= 0 ? '+' : '';
-    const color = change >= 0 ? 'text-emerald-600' : 'text-rose-600';
+    const isUp = change >= 0;
     return (
-      <span className={`font-mono text-xs font-bold ${color}`}>
-        {sign}{change.toFixed(2)}%
+      <span
+        className={`inline-flex items-center space-x-1 font-mono text-xs font-bold ${
+          isUp ? 'text-emerald-600' : 'text-rose-600'
+        }`}
+      >
+        {isUp ? (
+          <TrendingUp className="w-3.5 h-3.5 shrink-0" />
+        ) : (
+          <TrendingDown className="w-3.5 h-3.5 shrink-0" />
+        )}
+        <span>
+          {sign}
+          {change.toFixed(2)}%
+        </span>
       </span>
     );
   };
 
-  // Filter out core watchlist table items from top movers
-  const coreTickers = ['NVDA', 'TSLA', 'AAPL', 'MSFT'];
-  const coreList = watchlist.filter(item => coreTickers.includes(item.symbol));
-  
-  // Custom movers hardcoded or derived to match Screenshot 3
-  const movers = [
-    { symbol: 'SMCI', name: 'Super Micro Computer', changePercent: 8.42, isUp: true },
-    { symbol: 'ARM', name: 'ARM Holdings', changePercent: 5.11, isUp: true },
-    { symbol: 'SNOW', name: 'Snowflake Inc.', changePercent: -4.12, isUp: false },
-  ];
+  const isEmpty = savedSymbols.length === 0;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full max-w-6xl mx-auto p-1 animate-fade-in">
-      
-      {/* LEFT COLUMN: Watchlist & Insights (Col-span 8) */}
-      <div className="lg:col-span-8 space-y-6">
-        {/* Watchlist Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-100 pb-4">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Watchlist</h2>
-            <p className="text-xs text-slate-500 mt-1 font-medium">Real-time tracking and AI sentiment analysis for your core positions.</p>
-          </div>
-          
-          <div className="flex items-center space-x-2 font-mono text-xs">
-            <button className="flex items-center space-x-1.5 bg-white border border-gray-200 hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg transition-colors cursor-pointer font-bold shadow-sm">
-              <Download className="w-3.5 h-3.5" />
-              <span>Export</span>
-            </button>
-            <button className="flex items-center space-x-1.5 bg-white border border-gray-200 hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg transition-colors cursor-pointer font-bold shadow-sm">
-              <Filter className="w-3.5 h-3.5" />
-              <span>Filter</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Watchlist Table */}
-        <div className="bg-white border border-gray-200 shadow-sm rounded-xl overflow-hidden">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-20 space-y-3">
-              <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-              <span className="text-xs font-mono text-slate-400">Loading watchlist details...</span>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-gray-200 bg-slate-50/50 font-mono text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3 px-6">Company</th>
-                    <th className="py-3 px-6">Current Price</th>
-                    <th className="py-3 px-6">24H Change</th>
-                    <th className="py-3 px-6">AI Sentiment</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 text-sm font-medium">
-                  {coreList.map((item, idx) => {
-                    const styles = getSentimentStyles(item.sentiment || 'Neutral');
-                    const initials = item.symbol.slice(0, 2);
-                    
-                    return (
-                      <tr key={idx} className="hover:bg-slate-50/30 transition-colors">
-                        <td className="py-4.5 px-6 flex items-center space-x-3.5">
-                          {/* Logo badge */}
-                          <div className="h-9 w-9 rounded-lg bg-slate-950 text-white font-mono font-black text-xs flex items-center justify-center select-none uppercase shrink-0">
-                            {initials}
-                          </div>
-                          <div>
-                            <p className="text-slate-900 font-bold tracking-tight">{item.name}</p>
-                            <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide font-semibold font-mono">
-                              {item.symbol} • {item.exchange}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="py-4.5 px-6 font-mono text-slate-700">
-                          {item.currencySymbol || '₹'}{formatPrice(item.price)}
-                        </td>
-                        <td className="py-4.5 px-6">
-                          {formatChange(item.changePercent)}
-                        </td>
-                        <td className="py-4.5 px-6">
-                          <div className="flex items-center space-x-3.5 min-w-[150px]">
-                            {/* Visual slider representing sentiment strength */}
-                            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                              <div className={`h-full ${styles.bar} ${styles.width}`} />
-                            </div>
-                            <span className={`font-mono text-[9px] font-bold px-2 py-0.5 rounded border tracking-wide uppercase shrink-0 ${styles.text}`}>
-                              {item.sentiment}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Automated Insight Box */}
-        <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-6 space-y-4">
+    <div className="w-full max-w-5xl mx-auto space-y-6 animate-fade-in p-1">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-100 pb-4">
+        <div>
           <div className="flex items-center space-x-2.5">
-            <Sparkles className="w-4 h-4 text-slate-900" />
-            <h4 className="text-sm font-bold text-slate-900 tracking-tight">Automated Insight</h4>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Watchlist</h2>
+            <span className="text-[11px] font-mono font-bold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full border border-slate-200">
+              {savedSymbols.length} {savedSymbols.length === 1 ? 'Position' : 'Positions'}
+            </span>
           </div>
-          <p className="text-slate-600 text-sm leading-relaxed font-medium">
-            Our aggregate sentiment model indicates a strong sector shift toward <strong className="text-slate-900">Semiconductors</strong> following recent fiscal policy updates. NVIDIA (NVDA) maintains the highest confidence score (0.92) across your watchlist, supported by positive institutional volume trends over the last 72 hours.
+          <p className="text-xs text-slate-500 mt-1 font-medium">
+            Real-time tracking and market quotes for your selected equities.
           </p>
-          <div className="flex space-x-2 font-mono text-xs pt-1">
-            <button className="bg-slate-950 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded-lg transition-colors cursor-pointer border border-transparent shadow-sm">
-              Full Sector Report
+        </div>
+
+        {!isEmpty && (
+          <div className="flex items-center space-x-2 font-mono text-xs">
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center space-x-1.5 bg-white border border-gray-200 hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg transition-colors cursor-pointer font-bold shadow-xs"
+              title="Export Watchlist as CSV"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export CSV</span>
             </button>
-            <button className="bg-white border border-gray-200 hover:bg-slate-50 text-slate-750 font-bold py-2 px-4 rounded-lg transition-colors cursor-pointer shadow-sm">
-              Compare Portfolios
+
+            <button
+              onClick={handleClearAll}
+              className="flex items-center space-x-1.5 bg-white border border-rose-200 hover:bg-rose-50 text-rose-600 px-3.5 py-2 rounded-lg transition-colors cursor-pointer font-bold shadow-xs"
+              title="Clear all items from watchlist"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear All</span>
             </button>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* RIGHT COLUMN: Market Overviews & Widgets (Col-span 4) */}
-      <div className="lg:col-span-4 space-y-6">
-        {/* Market Overview widget */}
-        <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-5 space-y-3">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold">Market Overview</span>
-          <div className="flex justify-between items-center">
-            <span className="text-sm font-extrabold text-slate-900">S&P 500</span>
-            <span className="text-xs font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">+1.2%</span>
+      {/* Main Container */}
+      <div className="bg-white border border-gray-200 shadow-sm rounded-xl overflow-hidden">
+        {loading && isEmpty ? (
+          <div className="flex flex-col items-center justify-center py-20 space-y-3">
+            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+            <span className="text-xs font-mono text-slate-400">Loading watchlist quotes...</span>
           </div>
-          <div className="h-6 w-full rounded bg-gradient-to-r from-emerald-100 to-emerald-25 border border-emerald-100/50" />
-        </div>
+        ) : isEmpty ? (
+          /* PURE EMPTY STATE */
+          <div className="p-12 sm:p-16 flex flex-col items-center text-center space-y-5">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-500 shadow-xs">
+              <Star className="w-8 h-8 fill-amber-400/40 text-amber-500" />
+            </div>
 
-        {/* Top Movers (24h) widget */}
-        <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-5 space-y-4">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold">Top Movers (24h)</span>
-          <div className="space-y-3">
-            {movers.map((mover, idx) => (
-              <div key={idx} className="flex items-center justify-between border-b border-gray-100 pb-2.5 last:border-0 last:pb-0">
-                <div className="space-y-0.5">
-                  <p className="text-xs font-bold text-slate-900">{mover.symbol}</p>
-                  <p className="text-[9px] text-slate-400 font-medium line-clamp-1">{mover.name}</p>
-                </div>
-                <div className="flex items-center space-x-1 font-mono text-xs font-bold">
-                  {mover.isUp ? (
-                    <TrendingUp className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  ) : (
-                    <TrendingDown className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                  )}
-                  <span className={mover.isUp ? 'text-emerald-600' : 'text-rose-600'}>
-                    {mover.isUp ? '+' : ''}{mover.changePercent}%
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+            <div className="space-y-2 max-w-md">
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                Your Watchlist is Empty
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                You have not added any stocks to your watchlist yet. Search for any company on the
+                Research Terminal and click the <strong className="text-slate-800">Star (★)</strong> or{' '}
+                <strong className="text-slate-800">&quot;Add to Watchlist&quot;</strong> icon to track it here.
+              </p>
+            </div>
 
-        {/* Watchlist Performance Mini Bar Chart */}
-        <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-5 space-y-3">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold font-mono">Watchlist Performance</span>
-          <div className="h-24 w-full flex items-end gap-3 px-2 pt-2 border-b border-gray-150 pb-px">
-            <div className="flex-1 bg-slate-200 h-1/2 rounded-t transition-all hover:bg-slate-300 cursor-pointer" title="Mon" />
-            <div className="flex-1 bg-slate-200 h-3/5 rounded-t transition-all hover:bg-slate-300 cursor-pointer" title="Tue" />
-            <div className="flex-1 bg-slate-300 h-2/5 rounded-t transition-all hover:bg-slate-400 cursor-pointer" title="Wed" />
-            <div className="flex-1 bg-blue-500 h-4/5 rounded-t transition-all hover:bg-blue-600 cursor-pointer" title="Thu" />
-            <div className="flex-1 bg-blue-600 h-full rounded-t transition-all hover:bg-blue-700 cursor-pointer" title="Fri" />
+            {onGoToResearch && (
+              <button
+                type="button"
+                onClick={onGoToResearch}
+                className="mt-2 inline-flex items-center space-x-2 bg-slate-950 hover:bg-slate-800 text-white font-mono text-xs font-bold px-5 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm border border-slate-900"
+              >
+                <Search className="w-3.5 h-3.5 text-blue-400" />
+                <span>Go to Research Terminal</span>
+              </button>
+            )}
           </div>
-          <div className="flex justify-between font-mono text-[9px] text-slate-400 uppercase tracking-wide font-semibold px-2">
-            <span>Mon</span>
-            <span>Fri</span>
-          </div>
-        </div>
+        ) : (
+          /* POPULATED EQUITIES TABLE */
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-gray-200 bg-slate-50/50 font-mono text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="py-3 px-6">Company</th>
+                  <th className="py-3 px-6">Current Price</th>
+                  <th className="py-3 px-6">24H Change</th>
+                  <th className="py-3 px-6">AI Sentiment</th>
+                  <th className="py-3 px-6 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-sm font-medium">
+                {watchlist.map((item, idx) => {
+                  const styles = getSentimentStyles(item.sentiment || 'Neutral');
+                  const initials = item.symbol.slice(0, 2);
 
-        {/* Upgrade to Pro Card */}
-        <div className="bg-slate-950 text-white rounded-xl p-5 space-y-4 shadow-md relative overflow-hidden">
-          {/* Faded Background Graph Effect */}
-          <div className="absolute right-0 bottom-0 opacity-10 pointer-events-none">
-            <svg width="100" height="80">
-              <path d="M 0 80 Q 20 60 40 70 T 80 40 T 120 10 L 120 80 Z" fill="white" />
-            </svg>
+                  return (
+                    <tr
+                      key={idx}
+                      onClick={() => onSelectTicker?.(item.symbol)}
+                      className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
+                    >
+                      <td className="py-4 px-6 flex items-center space-x-3.5">
+                        <div className="h-9 w-9 rounded-lg bg-slate-950 text-white font-mono font-black text-xs flex items-center justify-center select-none uppercase shrink-0 shadow-xs">
+                          {initials}
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-1.5">
+                            <p className="text-slate-900 font-bold tracking-tight group-hover:text-blue-600 transition-colors">
+                              {item.name}
+                            </p>
+                            <ArrowUpRight className="w-3.5 h-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide font-semibold font-mono">
+                            {item.symbol} • {item.exchange}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="py-4 px-6 font-mono text-slate-800 font-bold">
+                        {item.currencySymbol || '₹'}
+                        {formatPrice(item.price)}
+                      </td>
+                      <td className="py-4 px-6">{formatChange(item.changePercent)}</td>
+                      <td className="py-4 px-6">
+                        <div className="flex items-center space-x-3 min-w-[130px]">
+                          <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div className={`h-full ${styles.bar} ${styles.width}`} />
+                          </div>
+                          <span
+                            className={`font-mono text-[9px] font-bold px-2 py-0.5 rounded border tracking-wide uppercase shrink-0 ${styles.text}`}
+                          >
+                            {item.sentiment}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-4 px-6 text-right">
+                        <div className="flex items-center justify-end space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectTicker?.(item.symbol);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer text-xs font-mono font-bold flex items-center space-x-1"
+                            title="Open Research Terminal"
+                          >
+                            <span className="hidden sm:inline">Research</span>
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleRemoveTicker(item.symbol, e)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Remove from Watchlist"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          <div className="space-y-1.5 relative">
-            <h5 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">Upgrade to Pro</h5>
-            <p className="text-sm font-bold text-white leading-snug">
-              Get unlimited AI deeper-dive reports and priority execution.
-            </p>
-          </div>
-          <button className="w-full bg-white hover:bg-slate-50 text-slate-950 font-mono text-[10px] font-bold py-2.5 px-4 rounded-lg transition-colors cursor-pointer shadow-sm relative">
-            Go Pro Now
-          </button>
-        </div>
+        )}
       </div>
     </div>
   );
 };
+
 export default WatchlistTab;

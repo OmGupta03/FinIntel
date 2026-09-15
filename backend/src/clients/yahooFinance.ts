@@ -25,6 +25,7 @@ export interface CompanyOverview {
   open?: number;
   prevClose?: number;
   volume?: number;
+  lastTradeTime?: number | string;
 }
 
 export interface FinancialMetrics {
