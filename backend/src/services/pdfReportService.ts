@@ -446,6 +446,8 @@ export class PdfReportService {
         const totalPages = doc.bufferedPageRange().count;
         for (let i = 0; i < totalPages; i++) {
           doc.switchToPage(i);
+          // Prevent PDFKit from auto-adding blank pages when writing near bottom of page
+          doc.page.margins.bottom = 0;
 
           const footerY = doc.page.height - 35;
           doc.strokeColor(borderCol).lineWidth(0.5).moveTo(leftMargin, footerY).lineTo(leftMargin + pageWidth, footerY).stroke();
@@ -455,11 +457,11 @@ export class PdfReportService {
               'FININTEL / ALPHAINSIGHT AI COMPLIANCE DISCLAIMER: This document is an automated decision-support dossier produced for informational and educational purposes only. It does not constitute investment advice, endorsement, or a recommendation to buy or sell securities. Past performance and quantitative indicators do not guarantee future returns.',
               leftMargin,
               footerY + 4,
-              { width: pageWidth, align: 'center' }
+              { width: pageWidth, align: 'center', lineBreak: true }
             );
 
           doc.fillColor(textMuted).fontSize(6.5).font('Helvetica-Bold')
-            .text(`Page ${i + 1} of ${totalPages}`, leftMargin + pageWidth - 60, footerY + 18, { width: 60, align: 'right' });
+            .text(`Page ${i + 1} of ${totalPages}`, leftMargin + pageWidth - 60, footerY + 18, { width: 60, align: 'right', lineBreak: false });
         }
 
         doc.end();

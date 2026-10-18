@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   AreaChart,
   Area,
@@ -94,6 +94,7 @@ interface HistoricalChartProps {
   dayChangePercent?: number;
   prevClose?: number;
   simpleMode?: boolean;
+  defaultRange?: TimeRange;
 }
 
 export const HistoricalChart: React.FC<HistoricalChartProps> = ({
@@ -106,10 +107,15 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
   dayChangePercent,
   prevClose,
   simpleMode = false,
+  defaultRange = '1D',
 }) => {
   const activeCurrencySymbol = '₹';
-  const [activeRange, setActiveRange] = useState<TimeRange>('1Y');
+  const [activeRange, setActiveRange] = useState<TimeRange>(defaultRange);
   const [showSMA, setShowSMA] = useState(true);
+
+  useEffect(() => {
+    setActiveRange(defaultRange);
+  }, [ticker, defaultRange]);
 
   // Filter or construct dataset based on selected timeline range
   const activeDataset = useMemo(() => {

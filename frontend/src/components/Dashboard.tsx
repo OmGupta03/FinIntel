@@ -428,6 +428,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ report, onReset, onSelectP
 
       {/* Historical Chart */}
       <HistoricalChart
+        key={report.ticker}
         data={normalizedHistorical}
         intradayData={normalizedIntraday}
         ticker={report.ticker}

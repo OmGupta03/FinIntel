@@ -2,9 +2,10 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Next.js%2015-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/Next.js%2016-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
   <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/Express.js-000000?style=for-the-badge&logo=express&logoColor=white" alt="Express.js" />
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" />
   <img src="https://img.shields.io/badge/Google_Gemini-8E75B2?style=for-the-badge&logo=google&logoColor=white" alt="Gemini" />
 </p>
@@ -24,6 +25,7 @@ FinIntel is an institutional-grade, full-stack AI-driven equity research platfor
 - **Interactive Multi-Timeframe Charts**: Dynamic charting across 1D, 1W, 1M, 3M, 6M, 1Y, 3Y, 5Y, and All timelines with SMA overlays and volume distribution.
 - **Strict INR (₹) Currency Normalization**: Real-time currency conversions ensuring all market caps, target prices, and metrics display consistently in INR.
 - **Local Research History & Watchlists**: Fast, client-side persistence of previous reports and monitored equities.
+- **One-Command Docker Deployment**: Fully containerized backend and frontend services running seamlessly on any OS (macOS, Windows, Linux) via Docker Compose.
 
 ---
 
@@ -49,10 +51,11 @@ flowchart TD
 
 | Layer | Technologies |
 |---|---|
-| **Frontend** | Next.js 15 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS, Lucide React, Recharts |
-| **Backend** | Node.js, Express, TypeScript, LangChain / LangGraph patterns, SQLite / In-Memory Caching |
-| **AI & LLM** | Google Gemini (gemini-2.5 / gemini-3.5) |
+| **Frontend** | Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS, Lucide React, Recharts |
+| **Backend** | Node.js (v22+), Express, TypeScript, LangChain / LangGraph patterns, SQLite / In-Memory Caching |
+| **AI & LLM** | Google Gemini (`gemini-2.5` / `gemini-3.5-flash-lite`) |
 | **Market Data & Search** | Groww API, Yahoo Finance API, Tavily Search API |
+| **Containerization** | Docker, Docker Compose (Multi-container orchestration, persistent volumes) |
 | **Quality & Testing** | ESLint, TypeScript Compiler (`tsc`), Custom Deterministic Test Suites (`tsx`) |
 
 ---
@@ -63,14 +66,16 @@ flowchart TD
 FinIntel/
 ├── backend/
 │   ├── src/
-│   │   ├── agent/             # Multi-step research graph & simulation pipelines
+│   │   ├── agents/            # Multi-step research graph & simulation pipelines
 │   │   ├── config/            # Environment and application configurations
 │   │   ├── controllers/       # HTTP request handlers
 │   │   ├── routes/            # Express API route declarations
 │   │   ├── services/          # Market data (Groww/Yahoo), LLM, and calculation services
 │   │   ├── tests/             # Unit tests (Technicals, Health Score, Screener, Agent)
 │   │   └── utils/             # Math utilities, caching, and currency converters
+│   ├── .dockerignore          # Docker build exclusions for backend
 │   ├── .env.example           # Backend environment template
+│   ├── Dockerfile             # Production container recipe (Node 22 Alpine)
 │   ├── package.json
 │   └── tsconfig.json
 │
@@ -80,34 +85,75 @@ FinIntel/
 │   │   ├── components/        # React components (Dashboard, Charts, Screener, Tabs)
 │   │   ├── context/           # React context providers
 │   │   └── lib/               # Client utilities and API client definitions
+│   ├── .dockerignore          # Docker build exclusions for frontend
 │   ├── .env.example           # Frontend environment template
+│   ├── Dockerfile             # Production container recipe (Next.js 16)
 │   ├── package.json
 │   └── tsconfig.json
 │
+├── docker-compose.yml         # Multi-container orchestration (Backend + Frontend)
 ├── .gitignore                 # Root gitignore protecting secrets and build outputs
 └── README.md
 ```
 
 ---
 
-## Getting Started
+## Quickstart with Docker (Recommended)
+
+Run the entire platform on any operating system (**macOS, Windows, Linux**) with just Docker installed.
+
+### 1. Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+- Google Gemini API Key: [Google AI Studio](https://aistudio.google.com/)
+
+### 2. Clone & Configure
+```bash
+git clone https://github.com/OmGupta03/FinIntel.git
+cd FinIntel
+
+# Create backend .env file
+cp backend/.env.example backend/.env
+```
+
+Add your `GEMINI_API_KEY` into `backend/.env`:
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+### 3. Build & Run
+```bash
+docker compose up -d --build
+```
+
+Access the dashboard:
+* **Frontend:** [http://localhost:3000](http://localhost:3000)
+* **Backend API:** [http://localhost:5000/api/health](http://localhost:5000/api/health)
+
+### Useful Docker Commands:
+```bash
+# View live container logs
+docker compose logs -f
+
+# Check container status
+docker compose ps
+
+# Stop containers
+docker compose down
+```
+
+---
+
+## Manual Setup (Without Docker)
 
 ### Prerequisites
 
-- **Node.js**: v18.17+ or v20+ recommended
+- **Node.js**: v18.17+ or v20+ (v22+ recommended)
 - **npm** or **yarn** / **pnpm**
 - **Google Gemini API Key**: [Google AI Studio](https://aistudio.google.com/)
 - *(Optional)* **Tavily API Key**: [Tavily AI](https://tavily.com/)
 - *(Optional)* **Groww API Key**: For direct real-time NSE live feed
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/OmGupta03/FinIntel.git
-cd FinIntel
-```
-
-### 2. Backend Setup
+### 1. Backend Setup
 
 ```bash
 cd backend
@@ -142,7 +188,7 @@ npm run dev
 
 The backend will start at `http://localhost:5000`.
 
-### 3. Frontend Setup
+### 2. Frontend Setup
 
 In a new terminal:
 

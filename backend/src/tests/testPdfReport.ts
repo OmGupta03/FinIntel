@@ -130,6 +130,16 @@ async function testPdfReport() {
     throw new Error(`Invalid PDF header: ${header}`);
   }
 
+  // Count pages in generated PDF buffer
+  const text = pdfBuffer.toString('latin1');
+  const matches = text.match(/\/Type\s*\/Page\b/g);
+  const pageCount = matches ? matches.length : 0;
+  console.log(`Generated PDF page count: ${pageCount}`);
+
+  if (pageCount > 2) {
+    throw new Error(`Expected compact 2-page report, but received ${pageCount} pages (phantom blank pages detected).`);
+  }
+
   console.log('PDF Header verified: %PDF-');
   console.log('All PDF report tests passed successfully!');
 }

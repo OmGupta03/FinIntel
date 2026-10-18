@@ -163,6 +163,7 @@ export const SimpleResearchView: React.FC<SimpleResearchViewProps> = ({
       {/* 5. Simple Price Chart (Price line only, no technical overlays) */}
       <div className="bg-white border border-gray-200 rounded-2xl p-1 shadow-sm overflow-hidden">
         <HistoricalChart
+          key={report?.ticker}
           data={normalizedHistorical}
           intradayData={normalizedIntraday}
           ticker={report?.ticker}
